@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "system_info.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        freertos
+        esp_timer
+        esp_wifi
+    PRIV_REQUIRES
+        drivers
+        app_core
+)

@@ -1,0 +1,11 @@
+menu "SensorLib Configuration"
+
+    config SENSORLIB_ESP_IDF_NEW_API
+        bool "Use ESP-IDF 5.x new I2C master API"
+        default y if IDF_VERSION_MAJOR >= 5
+        help
+            Enable this option to use the new I2C master driver API
+            introduced in ESP-IDF 5.0. Required for ESP-IDF 5.4+
+            where the legacy driver was removed.
+
+endmenu

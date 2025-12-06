@@ -1,0 +1,13 @@
+## IDF Component Manager Manifest File
+dependencies:
+  idf: "^5.0"
+  espressif/es8311: "^1.0.0"
+
+  # LVGL
+  lvgl/lvgl: "^8"
+
+# After enabling Board Support Packages support in menuconfig, you can pick you specific BSP here
+  espressif/esp-box:
+    version: "^2.4.2"
+    rules:
+      - if: "target in [esp32s3]"

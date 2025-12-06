@@ -1,0 +1,13 @@
+idf_component_register(
+    SRCS
+        "display_init.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        driver
+        esp_lcd
+        esp_timer
+        freertos
+        lvgl
+        waveshare__esp_lcd_sh8601
+)

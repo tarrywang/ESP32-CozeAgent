@@ -1,0 +1,27 @@
+# BSP Board Component CMakeLists.txt
+
+idf_component_register(
+    SRCS
+        "bsp_board.c"
+        "bsp_i2s.c"
+        "bsp_display.c"
+        "bsp_touch.c"
+        "bsp_button.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        driver
+        esp_lcd
+        esp_timer
+        freertos
+        lvgl
+        esp_pm
+    PRIV_REQUIRES
+        spi_flash
+        heap
+)
+
+# Add compile options for LVGL
+target_compile_definitions(${COMPONENT_LIB} PUBLIC
+    LV_CONF_INCLUDE_SIMPLE=1
+)

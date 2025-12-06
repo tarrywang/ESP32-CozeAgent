@@ -1,0 +1,18 @@
+# Target ESP32-S3
+CONFIG_IDF_TARGET="esp32s3"
+
+CONFIG_EXAMPLE_MODE_MUSIC=y
+CONFIG_EXAMPLE_VOICE_VOLUME=80
+
+# SensorLib - use legacy I2C API to share bus with codec
+# CONFIG_SENSORLIB_ESP_IDF_NEW_API is not set
+
+# Disable legacy I2C backward compatibility in esp_codec_dev
+# CONFIG_CODEC_I2C_BACKWARD_COMPATIBLE is not set
+
+# Flash size (16MB for this board)
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Custom partition table with larger app partition (2MB)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

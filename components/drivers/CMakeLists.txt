@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "axp2101_driver.cpp"
+        "pcf85063_driver.cpp"
+        "i2c_bus.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        driver
+        esp_driver_i2c
+        esp_timer
+        waveshare__esp32_s3_touch_amoled_1_75
+    PRIV_REQUIRES
+        XPowersLib
+        SensorLib
+)
