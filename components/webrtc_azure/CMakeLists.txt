@@ -1,0 +1,20 @@
+idf_component_register(
+    SRCS
+        "webrtc_azure.c"
+        "openai_signaling.c"
+        "media_sys.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_webrtc
+        av_render
+        esp_capture
+        media_lib_sal
+        webrtc_utils
+        json
+        esp_timer
+        waveshare__esp32_s3_touch_amoled_1_75
+        esp_codec_dev
+        espressif__esp_audio_codec
+        codec_board
+)

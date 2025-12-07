@@ -15,5 +15,9 @@ dependencies:
   # cJSON parser
   espressif/cjson: "^1.7.0"
 
+  # Audio capture with AEC (Acoustic Echo Cancellation)
+  capture_audio_src:
+    path: ../components/esp_capture/src/impl/capture_audio_src
+
   idf:
     version: ">=5.0.0"

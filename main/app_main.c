@@ -33,11 +33,15 @@
 #include "audio_pipeline.h"
 #include "coze_ws.h"
 #include "azure_realtime.h"
+#include "webrtc_azure.h"
+#include "codec_init.h"  // For get_playback_handle() and get_record_handle() (TDM mode)
 #include "ui_manager.h"
 #include "app_core.h"
 #include "app_wifi.h"
 #include "bsp_button.h"
 #include "debug_console.h"
+#include "media_lib_adapter.h"
+#include "media_lib_os.h"
 
 // Sensor drivers and system info
 #include "axp2101_driver.h"
@@ -64,8 +68,8 @@ EventGroupHandle_t g_system_event_group = NULL;
 // BSP handles
 static lv_display_t *s_lv_display = NULL;
 static lv_indev_t *s_lv_indev = NULL;
-static esp_codec_dev_handle_t s_spk_codec = NULL;
-static esp_codec_dev_handle_t s_mic_codec = NULL;
+// Audio handles are now managed by codec_board (TDM mode for AEC)
+// Use get_playback_handle() and get_record_handle() instead
 
 static void log_current_time(const char *prefix)
 {
@@ -176,7 +180,7 @@ static void wifi_event_callback(app_wifi_event_t event)
 }
 
 /**
- * @brief Azure Realtime event callback
+ * @brief Azure Realtime event callback (WebSocket - OLD/DISABLED)
  *
  * Handles events from Azure OpenAI Realtime API including session creation,
  * audio responses, transcripts, and errors.
@@ -221,6 +225,53 @@ static void azure_realtime_event_callback(const azure_event_t *event, void *user
 }
 
 /**
+ * @brief WebRTC Azure event callback (NEW - WebRTC P2P)
+ *
+ * Handles events from Azure OpenAI Realtime API via WebRTC.
+ */
+static void webrtc_azure_event_callback(webrtc_azure_event_t *event, void *user_data)
+{
+    if (!event) {
+        return;
+    }
+
+    switch (event->type) {
+        case WEBRTC_AZURE_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "✅ WebRTC connected");
+            xEventGroupSetBits(g_system_event_group, AZURE_CONNECTED_BIT);
+            break;
+
+        case WEBRTC_AZURE_EVENT_DISCONNECTED:
+            ESP_LOGW(TAG, "❌ WebRTC disconnected");
+            xEventGroupClearBits(g_system_event_group, AZURE_CONNECTED_BIT);
+            break;
+
+        case WEBRTC_AZURE_EVENT_DATA_CHANNEL_OPEN:
+            ESP_LOGI(TAG, "✅ Data channel connected - voice interaction ready");
+            break;
+
+        case WEBRTC_AZURE_EVENT_TRANSCRIPT:
+            if (event->transcript.text) {
+                ESP_LOGI(TAG, "📝 Transcript: %s", event->transcript.text);
+            }
+            break;
+
+        case WEBRTC_AZURE_EVENT_FUNCTION_CALL:
+            ESP_LOGI(TAG, "🔧 Function call: %s", event->function_call.name);
+            break;
+
+        case WEBRTC_AZURE_EVENT_ERROR:
+            ESP_LOGE(TAG, "❌ WebRTC error: %s (code: %d)",
+                     event->error.message ? event->error.message : "unknown",
+                     event->error.code);
+            break;
+
+        default:
+            break;
+    }
+}
+
+/**
  * @brief Get the LVGL display handle
  */
 lv_display_t *app_get_display(void)
@@ -237,19 +288,19 @@ lv_indev_t *app_get_input_dev(void)
 }
 
 /**
- * @brief Get speaker codec handle
+ * @brief Get speaker codec handle (from codec_board TDM mode)
  */
 esp_codec_dev_handle_t app_get_speaker_codec(void)
 {
-    return s_spk_codec;
+    return get_playback_handle();  // From codec_board (TDM mode)
 }
 
 /**
- * @brief Get microphone codec handle
+ * @brief Get microphone codec handle (from codec_board TDM mode)
  */
 esp_codec_dev_handle_t app_get_mic_codec(void)
 {
-    return s_mic_codec;
+    return get_record_handle();  // From codec_board (TDM mode)
 }
 
 /**
@@ -371,29 +422,23 @@ static esp_err_t system_init(void)
     ESP_LOGW(TAG, "Touch input not available (manual display init)");
     ESP_LOGI(TAG, "Display + LVGL initialized (manual)");
 
-    // ==== Phase 4: Audio Initialization ====
-    ESP_LOGI(TAG, "Initializing audio...");
-    ret = bsp_audio_init(NULL);  // Use default I2S config
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Audio init failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
+    // ==== Phase 4: Audio Initialization (TDM mode for AEC) ====
+    ESP_LOGI(TAG, "Initializing audio with TDM mode for AEC...");
 
-    // Initialize speaker codec
-    s_spk_codec = bsp_audio_codec_speaker_init();
-    if (s_spk_codec == NULL) {
-        ESP_LOGE(TAG, "Speaker codec init failed");
+    // Initialize audio board using codec_board with TDM mode
+    // This provides 4-channel I2S data required for AEC:
+    // - Channel 0: MIC input (user voice)
+    // - Channel 1: Reference signal (speaker output for echo cancellation)
+    init_audio_board();
+
+    // Verify codec handles are available
+    esp_codec_dev_handle_t spk_handle = get_playback_handle();
+    esp_codec_dev_handle_t mic_handle = get_record_handle();
+    if (spk_handle == NULL || mic_handle == NULL) {
+        ESP_LOGE(TAG, "Audio codec init failed: spk=%p, mic=%p", spk_handle, mic_handle);
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "Speaker codec initialized");
-
-    // Initialize microphone codec
-    s_mic_codec = bsp_audio_codec_microphone_init();
-    if (s_mic_codec == NULL) {
-        ESP_LOGE(TAG, "Microphone codec init failed");
-        return ESP_FAIL;
-    }
-    ESP_LOGI(TAG, "Microphone codec initialized");
+    ESP_LOGI(TAG, "Audio initialized with TDM mode: spk=%p, mic=%p", spk_handle, mic_handle);
     xEventGroupSetBits(g_system_event_group, AUDIO_READY_BIT);
 
     // ==== Phase 5: UI Manager Initialization ====
@@ -457,38 +502,34 @@ static esp_err_t system_init(void)
     }
     ESP_LOGI(TAG, "Audio pipeline initialized");
 
-    // ==== Phase 9: Azure Realtime API Initialization ====
-    // DISABLED: Temporarily disable Azure for display testing
-#if 0
-    ESP_LOGI(TAG, "Initializing Azure Realtime client...");
-    ret = azure_realtime_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Azure Realtime init failed: %s", esp_err_to_name(ret));
-        return ret;
-    }
+    // ==== Phase 9: WebRTC Azure Initialization (replaces old WebSocket Azure) ====
+    ESP_LOGI(TAG, "Adding media lib adapter...");
+    media_lib_add_default_adapter();
 
-    // Configure Azure OpenAI credentials
-    azure_realtime_config_t azure_cfg = {
-        .api_key = "2d621e68de6c4c1eb24e3f686c4b54df",
-        .resource_name = "anony-company",  // Azure resource name (SDK appends .openai.azure.com)
-        .deployment_name = "gpt-realtime",
-        .voice = "alloy",
-        .sample_rate = 8000,
-        .audio_format = "g711_ulaw",
-        .use_server_vad = false,
-        .callback = azure_realtime_event_callback,  // Event callback handler
+    ESP_LOGI(TAG, "Initializing WebRTC Azure module...");
+    webrtc_azure_config_t webrtc_cfg = {
+        .wifi_ssid = WIFI_SSID,
+        .wifi_password = WIFI_PASSWORD,
+        .event_cb = webrtc_azure_event_callback,
         .user_data = NULL,
     };
 
-    ret = azure_realtime_configure(&azure_cfg);
+    ret = webrtc_azure_init(&webrtc_cfg);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Azure configure failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "WebRTC Azure init failed: %s", esp_err_to_name(ret));
         return ret;
     }
-    ESP_LOGI(TAG, "Azure Realtime client configured (resource: %s, deployment: %s)",
-             azure_cfg.resource_name, azure_cfg.deployment_name);
-#endif
-    ESP_LOGW(TAG, "Azure Realtime DISABLED for display testing");
+    ESP_LOGI(TAG, "WebRTC Azure module initialized");
+
+    // Start WebRTC if WiFi is already connected
+    if (bits & WIFI_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "Starting WebRTC connection...");
+        ret = webrtc_azure_start();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "WebRTC start failed (will retry): %s", esp_err_to_name(ret));
+            // Not critical - will retry in main loop
+        }
+    }
 
     // ==== Phase 9: Application Core Initialization ====
     ESP_LOGI(TAG, "Initializing application core...");
@@ -616,9 +657,7 @@ void app_main(void)
         if (log_counter % 5 == 0) {
             ESP_LOGI(TAG, "--- STATUS ---");
             ESP_LOGI(TAG, "WiFi: %s", (bits & WIFI_CONNECTED_BIT) ? "CONNECTED" : "DISCONNECTED");
-            // DISABLED: Azure status for display testing
-            // ESP_LOGI(TAG, "Azure: %s", azure_realtime_state_to_string(azure_realtime_get_state()));
-            ESP_LOGI(TAG, "Azure: DISABLED (display testing)");
+            ESP_LOGI(TAG, "WebRTC: %s", webrtc_azure_is_connected() ? "CONNECTED" : "DISCONNECTED");
             ESP_LOGI(TAG, "App:  %s", app_core_state_to_string(app_core_get_state()));
             ESP_LOGI(TAG, "Ready for conversation: %s", app_core_is_ready() ? "YES - TAP TO START" : "NO");
             ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
@@ -632,15 +671,16 @@ void app_main(void)
             app_wifi_reconnect();
         }
 
-        // Auto-connect to Azure if WiFi is connected but Azure is disconnected
-        // DISABLED: Azure auto-reconnect for display testing
-#if 0
-        if ((bits & WIFI_CONNECTED_BIT) && azure_realtime_get_state() == AZURE_STATE_DISCONNECTED) {
-            ESP_LOGI(TAG, "WiFi connected, connecting to Azure server...");
-            log_current_time("Azure connect");
-            azure_realtime_connect();
+        // Auto-connect WebRTC if WiFi is connected but WebRTC is not running
+        // Use is_running() instead of is_connected() to avoid interrupting DTLS handshake
+        if ((bits & WIFI_CONNECTED_BIT) && !webrtc_azure_is_running()) {
+            ESP_LOGI(TAG, "WiFi connected, starting WebRTC connection...");
+            log_current_time("WebRTC connect");
+            webrtc_azure_start();
         }
-#endif
+
+        // Query WebRTC status periodically
+        webrtc_azure_query();
 
         // Sleep for 10 seconds
         vTaskDelay(pdMS_TO_TICKS(10000));

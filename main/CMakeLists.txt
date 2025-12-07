@@ -22,4 +22,7 @@ idf_component_register(
         drivers
         system_info
         display
+        webrtc_azure
+        media_lib_sal
+        codec_board
 )
